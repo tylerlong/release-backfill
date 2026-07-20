@@ -12,7 +12,8 @@ import {
   formatPlan,
   GitHubRestApi,
   getCommitsBetween,
-  readGitHubConfig,
+  getGitHubRepository,
+  readConfig,
 } from "./release-backfill-lib.js";
 
 main().catch((error) => {
@@ -22,13 +23,7 @@ main().catch((error) => {
 
 async function main() {
   const apply = process.argv.includes("--apply");
-  const repoPath = process.argv.slice(2).find((arg) => !arg.startsWith("-"));
-
-  if (!repoPath) {
-    throw new Error("Usage: pnpm release:backfill <repo-path> [--apply]");
-  }
-
-  const repoRoot = resolve(repoPath);
+  const { repoRoot, token } = readConfig();
   if (!existsSync(resolve(repoRoot, "package.json"))) {
     throw new Error(`Missing package.json in ${repoRoot}.`);
   }
@@ -42,11 +37,11 @@ async function main() {
     throw new Error(`Not a Git repository: ${repoRoot}`);
   }
 
-  const { repository, token } = readGitHubConfig();
+  const repository = getGitHubRepository(repoRoot);
 
   if (apply && !token) {
     throw new Error(
-      "Missing GITHUB_TOKEN. Add it to the repo .env before running with --apply.",
+      "Missing GITHUB_TOKEN. Add it to .env before running with --apply.",
     );
   }
 

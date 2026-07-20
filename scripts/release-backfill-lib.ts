@@ -562,20 +562,50 @@ export function formatConflicts(conflicts: ReleaseConflict[]) {
   ].join("\n");
 }
 
-export function readGitHubConfig() {
-  const env = readEnv(resolve(process.cwd(), ".env"));
-  const repository = env.GITHUB_REPOSITORY ?? process.env.GITHUB_REPOSITORY;
+export function readConfig(
+  envPath = resolve(process.cwd(), ".env"),
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  const env = readEnv(envPath);
+  const repoPath = env.LOCAL_REPO_PATH ?? environment.LOCAL_REPO_PATH;
 
-  if (!repository) {
+  if (!repoPath) {
     throw new Error(
-      "Missing GITHUB_REPOSITORY. Add GITHUB_REPOSITORY=owner/repo to .env.",
+      "Missing LOCAL_REPO_PATH. Add LOCAL_REPO_PATH=../repository to .env.",
     );
   }
 
   return {
-    repository,
-    token: env.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN,
+    repoRoot: resolve(repoPath),
+    token: env.GITHUB_TOKEN ?? environment.GITHUB_TOKEN,
   };
+}
+
+export function getGitHubRepository(repoRoot: string) {
+  let remoteUrl: string;
+
+  try {
+    remoteUrl = runGit(["remote", "get-url", "origin"], repoRoot);
+  } catch {
+    throw new Error(`Missing origin remote in ${repoRoot}.`);
+  }
+
+  return parseGitHubRepository(remoteUrl);
+}
+
+export function parseGitHubRepository(remoteUrl: string) {
+  const normalized = remoteUrl.trim().replace(/\.git$/i, "");
+  const match = normalized.match(
+    /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/github\.com\/)([^/\s]+\/[^/\s]+)$/i,
+  );
+
+  if (!match) {
+    throw new Error(
+      "Unsupported origin remote. Expected a github.com SSH or HTTPS URL.",
+    );
+  }
+
+  return match[1];
 }
 
 function getGitHubDiagnosticHeaders(headers: Headers) {

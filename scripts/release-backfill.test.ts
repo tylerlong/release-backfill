@@ -1,6 +1,9 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import {
   applyBackfill,
@@ -10,9 +13,67 @@ import {
   type GitHubApi,
   GitHubApiError,
   type GitHubRepository,
+  parseGitHubRepository,
+  readConfig,
 } from "./release-backfill-lib.js";
 
 const GITHUB_REPOSITORY = "example/widgets";
+
+test("parses GitHub SSH and HTTPS remotes", () => {
+  assert.equal(
+    parseGitHubRepository("git@github.com:ringcentral/web-phone.git\n"),
+    "ringcentral/web-phone",
+  );
+  assert.equal(
+    parseGitHubRepository(
+      "ssh://git@github.com/ringcentral/ringcentral-web-phone.git",
+    ),
+    "ringcentral/ringcentral-web-phone",
+  );
+  assert.equal(
+    parseGitHubRepository("https://github.com/ringcentral/web-phone"),
+    "ringcentral/web-phone",
+  );
+  assert.throws(
+    () => parseGitHubRepository("git@gitlab.com:ringcentral/web-phone.git"),
+    /Unsupported origin remote/,
+  );
+});
+
+test("local .env config overrides globals and globals remain fallbacks", () => {
+  const directory = mkdtempSync(join(tmpdir(), "release-backfill-config-"));
+  const envPath = join(directory, ".env");
+
+  try {
+    writeFileSync(
+      envPath,
+      "LOCAL_REPO_PATH=../local-repo\nGITHUB_TOKEN=local-token\n",
+    );
+
+    assert.deepEqual(
+      readConfig(envPath, {
+        GITHUB_TOKEN: "global-token",
+        LOCAL_REPO_PATH: "../global-repo",
+      }),
+      {
+        repoRoot: resolve("../local-repo"),
+        token: "local-token",
+      },
+    );
+    assert.deepEqual(
+      readConfig(join(directory, "missing.env"), {
+        GITHUB_TOKEN: "global-token",
+        LOCAL_REPO_PATH: "../global-repo",
+      }),
+      {
+        repoRoot: resolve("../global-repo"),
+        token: "global-token",
+      },
+    );
+  } finally {
+    rmSync(directory, { recursive: true });
+  }
+});
 
 test("discovers stable 2.x backfill targets and skips prereleases/gaps", () => {
   const changes = collectVersionChanges([

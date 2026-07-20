@@ -11,29 +11,30 @@ releases before writing anything.
 Run a dry run:
 
 ```sh
-pnpm release:backfill ../ringcentral-web-phone
+pnpm release:backfill
 ```
 
 Publish the missing releases:
 
 ```sh
-pnpm release:backfill ../ringcentral-web-phone --apply
+pnpm release:backfill --apply
 ```
 
 `--apply` publishes real GitHub releases immediately. It does not create
 drafts. After each successful publish, the tool prints progress.
 
-Set the repository and token through the shell environment or this project's
-private `.env` file:
+Set the local checkout and token through the shell environment or this
+project's private `.env` file:
 
 ```dotenv
-GITHUB_REPOSITORY=ringcentral/ringcentral-web-phone
+LOCAL_REPO_PATH=../ringcentral-web-phone
 GITHUB_TOKEN=github_pat_...
 ```
 
 `GITHUB_TOKEN` is only required for `--apply` and needs repository Contents set
 to read/write. Values in `.env` take priority over corresponding shell
-environment values. Do not commit `.env` or tokens.
+environment values. The GitHub repository is derived from the local checkout's
+`origin` remote. Do not commit `.env` or tokens.
 
 Run checks:
 
