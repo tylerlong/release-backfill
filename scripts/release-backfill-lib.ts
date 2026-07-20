@@ -564,7 +564,7 @@ export function formatConflicts(conflicts: ReleaseConflict[]) {
 
 export function readGitHubConfig() {
   const env = readEnv(resolve(process.cwd(), ".env"));
-  const repository = process.env.GITHUB_REPOSITORY ?? env.GITHUB_REPOSITORY;
+  const repository = env.GITHUB_REPOSITORY ?? process.env.GITHUB_REPOSITORY;
 
   if (!repository) {
     throw new Error(
@@ -574,7 +574,7 @@ export function readGitHubConfig() {
 
   return {
     repository,
-    token: process.env.GITHUB_TOKEN ?? env.GITHUB_TOKEN,
+    token: env.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN,
   };
 }
 

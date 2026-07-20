@@ -32,7 +32,8 @@ GITHUB_TOKEN=github_pat_...
 ```
 
 `GITHUB_TOKEN` is only required for `--apply` and needs repository Contents set
-to read/write. Do not commit `.env` or tokens.
+to read/write. Values in `.env` take priority over corresponding shell
+environment values. Do not commit `.env` or tokens.
 
 Run checks:
 
