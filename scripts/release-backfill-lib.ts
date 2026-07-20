@@ -5,7 +5,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export const GITHUB_API = "https://api.github.com";
-export const BASELINE_VERSION = "2.0.0";
 
 export type GitCommit = {
   date: string;
@@ -43,8 +42,8 @@ export type ReleaseConflict = {
 };
 
 export type BackfillPlan = {
-  baseline: VersionChange;
   conflicts: ReleaseConflict[];
+  cutoffDate: string;
   existing: VersionChange[];
   repository: string;
   stableChanges: VersionChange[];
@@ -278,33 +277,27 @@ export function buildBackfillPlan(
   repository: string,
   versionChanges: VersionChange[],
   existingRemote: ExistingRemote,
+  cutoffDate: string,
   getCommitsForTarget: (
     previousStable: VersionChange,
     change: VersionChange,
   ) => GitCommit[] = () => [],
 ): BackfillPlan {
-  const stableChanges = versionChanges.filter((change) =>
+  const allStableChanges = versionChanges.filter((change) =>
     isStable2xVersion(change.version),
   );
-  const baselineIndex = stableChanges.findIndex(
-    (change) => change.version === BASELINE_VERSION,
-  );
-
-  if (baselineIndex === -1) {
-    throw new Error(`Missing stable baseline version ${BASELINE_VERSION}.`);
-  }
-
-  const baseline = stableChanges[baselineIndex];
   const conflicts: ReleaseConflict[] = [];
   const existing: VersionChange[] = [];
+  const stableChanges: VersionChange[] = [];
   const targets: ReleaseTarget[] = [];
 
-  for (
-    let index = baselineIndex + 1;
-    index < stableChanges.length;
-    index += 1
-  ) {
-    const change = stableChanges[index];
+  for (let index = 1; index < allStableChanges.length; index += 1) {
+    const change = allStableChanges[index];
+    if (change.date < cutoffDate) {
+      continue;
+    }
+
+    stableChanges.push(change);
     const hasTag = existingRemote.tags.has(change.version);
     const hasRelease = existingRemote.releases.has(change.version);
 
@@ -318,7 +311,7 @@ export function buildBackfillPlan(
       continue;
     }
 
-    const previousStable = stableChanges[index - 1];
+    const previousStable = allStableChanges[index - 1];
     targets.push(
       buildReleaseTarget(
         repository,
@@ -329,7 +322,14 @@ export function buildBackfillPlan(
     );
   }
 
-  return { baseline, conflicts, existing, repository, stableChanges, targets };
+  return {
+    conflicts,
+    cutoffDate,
+    existing,
+    repository,
+    stableChanges,
+    targets,
+  };
 }
 
 export function buildReleaseTarget(
@@ -525,8 +525,9 @@ export function formatGitHubApiError(
 
 export function formatPlan(plan: BackfillPlan) {
   const lines = [
-    `Stable 2.x version changes: ${plan.stableChanges.length}`,
-    `Existing stable 2.x releases after ${BASELINE_VERSION}: ${plan.existing.length}`,
+    `Stable 2.x version changes since ${plan.cutoffDate}: ${plan.stableChanges.length}`,
+    `Existing stable 2.x releases since ${plan.cutoffDate}: ${plan.existing.length}`,
+    `Conflicting stable 2.x releases since ${plan.cutoffDate}: ${plan.conflicts.length}`,
     `Missing stable 2.x releases to create: ${plan.targets.length}`,
   ];
 
@@ -568,6 +569,7 @@ export function readConfig(
 ) {
   const env = readEnv(envPath);
   const repoPath = env.LOCAL_REPO_PATH ?? environment.LOCAL_REPO_PATH;
+  const monthsValue = env.BACKFILL_MONTHS ?? environment.BACKFILL_MONTHS;
 
   if (!repoPath) {
     throw new Error(
@@ -575,10 +577,35 @@ export function readConfig(
     );
   }
 
+  if (!monthsValue) {
+    throw new Error(
+      "Missing BACKFILL_MONTHS. Add BACKFILL_MONTHS=18 to .env.",
+    );
+  }
+
+  const months = Number(monthsValue);
+  if (!Number.isSafeInteger(months) || months <= 0) {
+    throw new Error("BACKFILL_MONTHS must be a positive whole number.");
+  }
+
   return {
+    months,
     repoRoot: resolve(repoPath),
     token: env.GITHUB_TOKEN ?? environment.GITHUB_TOKEN,
   };
+}
+
+export function getCutoffDate(months: number, now = new Date()) {
+  const year = now.getFullYear();
+  const month = now.getMonth() - months;
+  const day = Math.min(now.getDate(), new Date(year, month + 1, 0).getDate());
+  const cutoff = new Date(year, month, day);
+
+  return [
+    cutoff.getFullYear(),
+    String(cutoff.getMonth() + 1).padStart(2, "0"),
+    String(cutoff.getDate()).padStart(2, "0"),
+  ].join("-");
 }
 
 export function getGitHubRepository(repoRoot: string) {

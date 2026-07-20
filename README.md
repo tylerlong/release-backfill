@@ -4,9 +4,9 @@ Backfills missing GitHub releases for stable `2.x` package versions in the
 RingCentral Web Phone repository.
 
 The tool scans the target repository's `package.json` history, finds stable
-`2.x` version bumps after `2.0.0`, skips prereleases, builds release notes from
-the commits between stable versions, and checks GitHub for existing tags and
-releases before writing anything.
+`2.x` version bumps within a configured rolling window, skips prereleases,
+builds release notes from the commits between stable versions, and checks
+GitHub for existing tags and releases before writing anything.
 
 Run a dry run:
 
@@ -28,13 +28,15 @@ project's private `.env` file:
 
 ```dotenv
 LOCAL_REPO_PATH=../ringcentral-web-phone
+BACKFILL_MONTHS=18
 GITHUB_TOKEN=github_pat_...
 ```
 
-`GITHUB_TOKEN` is only required for `--apply` and needs repository Contents set
-to read/write. Values in `.env` take priority over corresponding shell
-environment values. The GitHub repository is derived from the local checkout's
-`origin` remote. Do not commit `.env` or tokens.
+`BACKFILL_MONTHS` must be a positive whole number. `GITHUB_TOKEN` is only
+required for `--apply` and needs repository Contents set to read/write. Values
+in `.env` take priority over corresponding shell environment values. The GitHub
+repository is derived from the local checkout's `origin` remote. Do not commit
+`.env` or tokens.
 
 Run checks:
 

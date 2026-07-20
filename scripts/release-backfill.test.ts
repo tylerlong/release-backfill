@@ -13,11 +13,13 @@ import {
   type GitHubApi,
   GitHubApiError,
   type GitHubRepository,
+  getCutoffDate,
   parseGitHubRepository,
   readConfig,
 } from "./release-backfill-lib.js";
 
 const GITHUB_REPOSITORY = "example/widgets";
+const CUTOFF_DATE = "2025-01-01";
 
 test("parses GitHub SSH and HTTPS remotes", () => {
   assert.equal(
@@ -47,25 +49,29 @@ test("local .env config overrides globals and globals remain fallbacks", () => {
   try {
     writeFileSync(
       envPath,
-      "LOCAL_REPO_PATH=../local-repo\nGITHUB_TOKEN=local-token\n",
+      "LOCAL_REPO_PATH=../local-repo\nBACKFILL_MONTHS=18\nGITHUB_TOKEN=local-token\n",
     );
 
     assert.deepEqual(
       readConfig(envPath, {
+        BACKFILL_MONTHS: "24",
         GITHUB_TOKEN: "global-token",
         LOCAL_REPO_PATH: "../global-repo",
       }),
       {
+        months: 18,
         repoRoot: resolve("../local-repo"),
         token: "local-token",
       },
     );
     assert.deepEqual(
       readConfig(join(directory, "missing.env"), {
+        BACKFILL_MONTHS: "24",
         GITHUB_TOKEN: "global-token",
         LOCAL_REPO_PATH: "../global-repo",
       }),
       {
+        months: 24,
         repoRoot: resolve("../global-repo"),
         token: "global-token",
       },
@@ -73,6 +79,27 @@ test("local .env config overrides globals and globals remain fallbacks", () => {
   } finally {
     rmSync(directory, { recursive: true });
   }
+});
+
+test("rejects missing and invalid backfill month values", () => {
+  const environment = { LOCAL_REPO_PATH: "../repo" };
+
+  assert.throws(() => readConfig("missing.env", environment), /Missing/);
+  for (const value of ["0", "-1", "1.5", "months"]) {
+    assert.throws(
+      () =>
+        readConfig("missing.env", {
+          ...environment,
+          BACKFILL_MONTHS: value,
+        }),
+      /positive whole number/,
+    );
+  }
+});
+
+test("calculates inclusive calendar-month cutoffs", () => {
+  assert.equal(getCutoffDate(18, new Date(2026, 6, 20)), "2025-01-20");
+  assert.equal(getCutoffDate(1, new Date(2025, 2, 31)), "2025-02-28");
 });
 
 test("discovers stable 2.x backfill targets and skips prereleases/gaps", () => {
@@ -90,12 +117,39 @@ test("discovers stable 2.x backfill targets and skips prereleases/gaps", () => {
     GITHUB_REPOSITORY,
     changes,
     existing(["2.0.0"], ["2.0.0"]),
+    CUTOFF_DATE,
   );
 
   assert.deepEqual(
     plan.targets.map((target) => target.version),
     ["2.0.1", "2.1.0", "2.1.3"],
   );
+});
+
+test("limits backfill to the cutoff and keeps an older predecessor", () => {
+  const plan = buildBackfillPlan(
+    GITHUB_REPOSITORY,
+    collectVersionChanges([
+      snapshot("a", "2.0.0", "Release 2.0.0", "2024-11-21"),
+      snapshot("b", "2.0.5", "Release 2.0.5", "2025-01-19"),
+      snapshot("c", "2.0.6", "Release 2.0.6", "2025-01-20"),
+      snapshot("d", "2.0.7", "Release 2.0.7", "2025-02-01"),
+    ]),
+    existing(["2.0.5", "2.0.7"], ["2.0.7"]),
+    "2025-01-20",
+  );
+
+  assert.deepEqual(
+    plan.stableChanges.map((change) => change.version),
+    ["2.0.6", "2.0.7"],
+  );
+  assert.deepEqual(plan.conflicts, []);
+  assert.deepEqual(
+    plan.existing.map((change) => change.version),
+    ["2.0.7"],
+  );
+  assert.equal(plan.targets[0].version, "2.0.6");
+  assert.equal(plan.targets[0].previousStableVersion, "2.0.5");
 });
 
 test("skips existing releases and continues at the next missing version", () => {
@@ -109,6 +163,7 @@ test("skips existing releases and continues at the next missing version", () => 
     GITHUB_REPOSITORY,
     changes,
     existing(["2.0.0", "2.1.5", "2.1.6"], ["2.0.0", "2.1.5", "2.1.6"]),
+    CUTOFF_DATE,
   );
 
   assert.deepEqual(
@@ -158,6 +213,7 @@ test("apply preflights repository access and publishes releases", async () => {
       snapshot("b", "2.0.1", "Fix one"),
     ]),
     existing(["2.0.0"], ["2.0.0"]),
+    CUTOFF_DATE,
   );
 
   await applyBackfill(api, plan);
@@ -186,6 +242,7 @@ test("apply reports progress after each published release", async () => {
       snapshot("d", "2.0.3", "Fix three"),
     ]),
     existing(["2.0.0"], ["2.0.0"]),
+    CUTOFF_DATE,
   );
 
   await applyBackfill(api, plan, {
@@ -209,6 +266,7 @@ test("apply fails before writes when a target has a tag/release conflict", async
       snapshot("b", "2.0.1", "Fix one"),
     ]),
     existing(["2.0.0", "2.0.1"], ["2.0.0"]),
+    CUTOFF_DATE,
   );
 
   await assert.rejects(() => applyBackfill(api, plan), /tag\/release conflict/);
@@ -340,6 +398,7 @@ function singleTargetPlan() {
       snapshot("b", "2.0.1", "Fix one"),
     ]),
     existing(["2.0.0"], ["2.0.0"]),
+    CUTOFF_DATE,
   );
 }
 
@@ -347,8 +406,13 @@ function existing(tags: string[], releases: string[]) {
   return { releases: new Set(releases), tags: new Set(tags) };
 }
 
-function snapshot(sha: string, version: string, message: string) {
-  return { ...commit(sha, message), version };
+function snapshot(
+  sha: string,
+  version: string,
+  message: string,
+  date = "2026-01-01",
+) {
+  return { ...commit(sha, message), date, version };
 }
 
 function commit(sha: string, message: string) {

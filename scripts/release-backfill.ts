@@ -12,6 +12,7 @@ import {
   formatPlan,
   GitHubRestApi,
   getCommitsBetween,
+  getCutoffDate,
   getGitHubRepository,
   readConfig,
 } from "./release-backfill-lib.js";
@@ -23,7 +24,7 @@ main().catch((error) => {
 
 async function main() {
   const apply = process.argv.includes("--apply");
-  const { repoRoot, token } = readConfig();
+  const { months, repoRoot, token } = readConfig();
   if (!existsSync(resolve(repoRoot, "package.json"))) {
     throw new Error(`Missing package.json in ${repoRoot}.`);
   }
@@ -48,10 +49,12 @@ async function main() {
   const api = new GitHubRestApi(repository, token);
   const existingRemote = await fetchExistingRemote(api);
   const versionChanges = discoverVersionChanges(repoRoot);
+  const cutoffDate = getCutoffDate(months);
   const plan = buildBackfillPlan(
     repository,
     versionChanges,
     existingRemote,
+    cutoffDate,
     (previousStable, change) =>
       getCommitsBetween(repoRoot, previousStable.sha, change.sha),
   );
