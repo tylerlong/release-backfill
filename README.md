@@ -23,10 +23,16 @@ pnpm release:backfill ../ringcentral-web-phone --apply
 `--apply` publishes real GitHub releases immediately. It does not create
 drafts. After each successful publish, the tool prints progress.
 
-For `--apply`, provide `GITHUB_TOKEN` through the shell environment or the
-target repository's private `.env` file. The token needs access to
-`ringcentral/ringcentral-web-phone` with repository Contents set to read/write.
-Do not commit tokens.
+Set the repository and token through the shell environment or this project's
+private `.env` file:
+
+```dotenv
+GITHUB_REPOSITORY=ringcentral/ringcentral-web-phone
+GITHUB_TOKEN=github_pat_...
+```
+
+`GITHUB_TOKEN` is only required for `--apply` and needs repository Contents set
+to read/write. Do not commit `.env` or tokens.
 
 Run checks:
 

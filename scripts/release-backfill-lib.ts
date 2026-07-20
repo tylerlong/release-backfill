@@ -4,8 +4,6 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-export const GITHUB_OWNER = "ringcentral";
-export const GITHUB_REPO = "ringcentral-web-phone";
 export const GITHUB_API = "https://api.github.com";
 export const BASELINE_VERSION = "2.0.0";
 
@@ -48,6 +46,7 @@ export type BackfillPlan = {
   baseline: VersionChange;
   conflicts: ReleaseConflict[];
   existing: VersionChange[];
+  repository: string;
   stableChanges: VersionChange[];
   targets: ReleaseTarget[];
 };
@@ -106,9 +105,15 @@ export class GitHubApiError extends Error {
 
 export class GitHubRestApi implements GitHubApi {
   readonly #fetch: typeof fetch;
+  readonly #repository: string;
   readonly #token?: string;
 
-  constructor(token?: string, fetchImplementation = fetch) {
+  constructor(
+    repository: string,
+    token?: string,
+    fetchImplementation = fetch,
+  ) {
+    this.#repository = repository;
     this.#token = token;
     this.#fetch = fetchImplementation;
   }
@@ -118,21 +123,19 @@ export class GitHubRestApi implements GitHubApi {
   }
 
   async getRepository() {
-    return this.#requestJson<GitHubRepository>(
-      `/repos/${GITHUB_OWNER}/${GITHUB_REPO}`,
-    );
+    return this.#requestJson<GitHubRepository>(`/repos/${this.#repository}`);
   }
 
   async listReleaseTags() {
     const releases = await this.#paginate<{ tag_name: string }>(
-      `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=100`,
+      `/repos/${this.#repository}/releases?per_page=100`,
     );
     return new Set(releases.map((release) => release.tag_name));
   }
 
   async listTags() {
     const tags = await this.#paginate<{ name: string }>(
-      `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/tags?per_page=100`,
+      `/repos/${this.#repository}/tags?per_page=100`,
     );
     return new Set(tags.map((tag) => tag.name));
   }
@@ -146,7 +149,7 @@ export class GitHubRestApi implements GitHubApi {
     target_commitish: string;
   }) {
     return this.#requestJson<CreatedRelease>(
-      `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases`,
+      `/repos/${this.#repository}/releases`,
       {
         body: JSON.stringify(input),
         method: "POST",
@@ -175,7 +178,10 @@ export class GitHubRestApi implements GitHubApi {
     const url = path.startsWith("http") ? path : `${GITHUB_API}${path}`;
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/vnd.github+json");
-    headers.set("User-Agent", `${GITHUB_REPO}-release-backfill`);
+    headers.set(
+      "User-Agent",
+      `${this.#repository.split("/").at(-1)}-release-backfill`,
+    );
     headers.set("X-GitHub-Api-Version", "2022-11-28");
 
     if (this.#token) {
@@ -269,6 +275,7 @@ export function getCommitsBetween(
 }
 
 export function buildBackfillPlan(
+  repository: string,
   versionChanges: VersionChange[],
   existingRemote: ExistingRemote,
   getCommitsForTarget: (
@@ -314,6 +321,7 @@ export function buildBackfillPlan(
     const previousStable = stableChanges[index - 1];
     targets.push(
       buildReleaseTarget(
+        repository,
         change,
         previousStable,
         getCommitsForTarget(previousStable, change),
@@ -321,15 +329,17 @@ export function buildBackfillPlan(
     );
   }
 
-  return { baseline, conflicts, existing, stableChanges, targets };
+  return { baseline, conflicts, existing, repository, stableChanges, targets };
 }
 
 export function buildReleaseTarget(
+  repository: string,
   change: VersionChange,
   previousStable: VersionChange,
   commits: GitCommit[],
 ): ReleaseTarget {
   const notes = buildReleaseNotes(
+    repository,
     change.version,
     previousStable.version,
     commits,
@@ -346,11 +356,12 @@ export function buildReleaseTarget(
 }
 
 export function buildReleaseNotes(
+  repository: string,
   version: string,
   previousVersion: string,
   commits: GitCommit[],
 ) {
-  const compareUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/compare/${previousVersion}...${version}`;
+  const compareUrl = `https://github.com/${repository}/compare/${previousVersion}...${version}`;
   const relevantCommits = commits.filter(
     (commit) => !isChoreCommit(commit.message),
   );
@@ -403,7 +414,7 @@ export async function applyBackfill(
   options: PublishOptions = {},
 ) {
   await preflightWrite(api, plan);
-  return createPublishedReleases(api, plan.targets, options);
+  return createPublishedReleases(api, plan.repository, plan.targets, options);
 }
 
 export async function preflightWrite(api: GitHubApi, plan: BackfillPlan) {
@@ -437,6 +448,7 @@ export async function preflightWrite(api: GitHubApi, plan: BackfillPlan) {
 
 export async function createPublishedReleases(
   api: GitHubApi,
+  repository: string,
   targets: ReleaseTarget[],
   options: PublishOptions = {},
 ) {
@@ -462,7 +474,9 @@ export async function createPublishedReleases(
       });
     } catch (error) {
       if (error instanceof GitHubApiError) {
-        throw new Error(formatGitHubApiError(target.version, error));
+        throw new Error(
+          formatGitHubApiError(repository, target.version, error),
+        );
       }
       throw error;
     }
@@ -471,7 +485,11 @@ export async function createPublishedReleases(
   return releases;
 }
 
-export function formatGitHubApiError(version: string, error: GitHubApiError) {
+export function formatGitHubApiError(
+  repository: string,
+  version: string,
+  error: GitHubApiError,
+) {
   const parsed = parseGitHubErrorBody(error.body);
   const headerLines = getGitHubDiagnosticHeaders(error.headers).map(
     ([name, value]) => `${name}: ${value}`,
@@ -498,7 +516,7 @@ export function formatGitHubApiError(version: string, error: GitHubApiError) {
 
   if (error.status === 403) {
     lines.push(
-      `Check GITHUB_TOKEN has Contents: Read and write for ${GITHUB_OWNER}/${GITHUB_REPO}.`,
+      `Check GITHUB_TOKEN has Contents: Read and write for ${repository}.`,
     );
   }
 
@@ -544,12 +562,20 @@ export function formatConflicts(conflicts: ReleaseConflict[]) {
   ].join("\n");
 }
 
-export function readGitHubToken(repoRoot: string) {
-  if (process.env.GITHUB_TOKEN) {
-    return process.env.GITHUB_TOKEN;
+export function readGitHubConfig() {
+  const env = readEnv(resolve(process.cwd(), ".env"));
+  const repository = process.env.GITHUB_REPOSITORY ?? env.GITHUB_REPOSITORY;
+
+  if (!repository) {
+    throw new Error(
+      "Missing GITHUB_REPOSITORY. Add GITHUB_REPOSITORY=owner/repo to .env.",
+    );
   }
 
-  return readEnv(resolve(repoRoot, ".env")).GITHUB_TOKEN;
+  return {
+    repository,
+    token: process.env.GITHUB_TOKEN ?? env.GITHUB_TOKEN,
+  };
 }
 
 function getGitHubDiagnosticHeaders(headers: Headers) {

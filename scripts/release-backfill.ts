@@ -12,7 +12,7 @@ import {
   formatPlan,
   GitHubRestApi,
   getCommitsBetween,
-  readGitHubToken,
+  readGitHubConfig,
 } from "./release-backfill-lib.js";
 
 main().catch((error) => {
@@ -42,7 +42,7 @@ async function main() {
     throw new Error(`Not a Git repository: ${repoRoot}`);
   }
 
-  const token = readGitHubToken(repoRoot);
+  const { repository, token } = readGitHubConfig();
 
   if (apply && !token) {
     throw new Error(
@@ -50,10 +50,11 @@ async function main() {
     );
   }
 
-  const api = new GitHubRestApi(token);
+  const api = new GitHubRestApi(repository, token);
   const existingRemote = await fetchExistingRemote(api);
   const versionChanges = discoverVersionChanges(repoRoot);
   const plan = buildBackfillPlan(
+    repository,
     versionChanges,
     existingRemote,
     (previousStable, change) =>

@@ -12,6 +12,8 @@ import {
   type GitHubRepository,
 } from "./release-backfill-lib.js";
 
+const GITHUB_REPOSITORY = "example/widgets";
+
 test("discovers stable 2.x backfill targets and skips prereleases/gaps", () => {
   const changes = collectVersionChanges([
     snapshot("a", "0.1.0", "Initial commit"),
@@ -23,7 +25,11 @@ test("discovers stable 2.x backfill targets and skips prereleases/gaps", () => {
     snapshot("g", "2.1.3", "Skipped 2.1.2 on purpose"),
   ]);
 
-  const plan = buildBackfillPlan(changes, existing(["2.0.0"], ["2.0.0"]));
+  const plan = buildBackfillPlan(
+    GITHUB_REPOSITORY,
+    changes,
+    existing(["2.0.0"], ["2.0.0"]),
+  );
 
   assert.deepEqual(
     plan.targets.map((target) => target.version),
@@ -39,6 +45,7 @@ test("skips existing releases and continues at the next missing version", () => 
     snapshot("d", "2.1.7", "Release 2.1.7"),
   ]);
   const plan = buildBackfillPlan(
+    GITHUB_REPOSITORY,
     changes,
     existing(["2.0.0", "2.1.5", "2.1.6"], ["2.0.0", "2.1.5", "2.1.6"]),
   );
@@ -54,7 +61,7 @@ test("skips existing releases and continues at the next missing version", () => 
 });
 
 test("filters chore commits and falls back to maintenance release notes", () => {
-  const notes = buildReleaseNotes("2.4.4", "2.4.3", [
+  const notes = buildReleaseNotes(GITHUB_REPOSITORY, "2.4.4", "2.4.3", [
     commit("a", "Upgrade dependencies"),
     commit("b", "Release 2.4.4"),
     commit("d", "Fix some lint issues"),
@@ -63,13 +70,17 @@ test("filters chore commits and falls back to maintenance release notes", () => 
   ]);
 
   assert.equal(notes.relevantCommits.length, 1);
+  assert.equal(
+    notes.compareUrl,
+    "https://github.com/example/widgets/compare/2.4.3...2.4.4",
+  );
   assert.match(notes.body, /Make SipClient type simplier/);
   assert.doesNotMatch(notes.body, /Upgrade dependencies/);
   assert.doesNotMatch(notes.body, /Release 2\.4\.4/);
   assert.doesNotMatch(notes.body, /Fix some lint issues/);
   assert.doesNotMatch(notes.body, /Add a test case/);
 
-  const fallback = buildReleaseNotes("2.0.7", "2.0.6", [
+  const fallback = buildReleaseNotes(GITHUB_REPOSITORY, "2.0.7", "2.0.6", [
     commit("d", "Release 2.0.7"),
   ]);
 
@@ -80,6 +91,7 @@ test("filters chore commits and falls back to maintenance release notes", () => 
 test("apply preflights repository access and publishes releases", async () => {
   const api = new FakeGitHubApi();
   const plan = buildBackfillPlan(
+    GITHUB_REPOSITORY,
     collectVersionChanges([
       snapshot("a", "2.0.0", "Release 2.0.0"),
       snapshot("b", "2.0.1", "Fix one"),
@@ -105,6 +117,7 @@ test("apply reports progress after each published release", async () => {
   const api = new FakeGitHubApi();
   const events: string[] = [];
   const plan = buildBackfillPlan(
+    GITHUB_REPOSITORY,
     collectVersionChanges([
       snapshot("a", "2.0.0", "Release 2.0.0"),
       snapshot("b", "2.0.1", "Fix one"),
@@ -129,6 +142,7 @@ test("apply reports progress after each published release", async () => {
 test("apply fails before writes when a target has a tag/release conflict", async () => {
   const api = new FakeGitHubApi();
   const plan = buildBackfillPlan(
+    GITHUB_REPOSITORY,
     collectVersionChanges([
       snapshot("a", "2.0.0", "Release 2.0.0"),
       snapshot("b", "2.0.1", "Fix one"),
@@ -169,6 +183,7 @@ test("publish failure includes GitHub 403 body and diagnostic headers", async ()
       assert.match(error.message, /x-ratelimit-remaining: 0/);
       assert.match(error.message, /x-github-request-id: ABC:123/);
       assert.match(error.message, /Contents: Read and write/);
+      assert.match(error.message, /example\/widgets/);
       return true;
     },
   );
@@ -258,6 +273,7 @@ type ReleaseTargetInput = Parameters<GitHubApi["createRelease"]>[0];
 
 function singleTargetPlan() {
   return buildBackfillPlan(
+    GITHUB_REPOSITORY,
     collectVersionChanges([
       snapshot("a", "2.0.0", "Release 2.0.0"),
       snapshot("b", "2.0.1", "Fix one"),
