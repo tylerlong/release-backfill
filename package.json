@@ -1,0 +1,17 @@
+{
+  "name": "release-backfill",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "release:backfill": "tsx scripts/release-backfill.ts",
+    "test": "tsx --test scripts/release-backfill.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.4",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3"
+  },
+  "packageManager": "pnpm@10.33.1"
+}
