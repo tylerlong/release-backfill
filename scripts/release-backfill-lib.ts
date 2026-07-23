@@ -284,7 +284,7 @@ export function buildBackfillPlan(
   ) => GitCommit[] = () => [],
 ): BackfillPlan {
   const allStableChanges = versionChanges.filter((change) =>
-    isStable2xVersion(change.version),
+    isStableVersion(change.version),
   );
   const conflicts: ReleaseConflict[] = [];
   const existing: VersionChange[] = [];
@@ -375,8 +375,8 @@ export function buildReleaseNotes(
   return { body, compareUrl, relevantCommits };
 }
 
-export function isStable2xVersion(version: string) {
-  return /^2\.\d+\.\d+$/.test(version);
+export function isStableVersion(version: string) {
+  return /^\d+\.\d+\.\d+$/.test(version);
 }
 
 export function isChoreCommit(message: string) {
@@ -427,7 +427,7 @@ export async function preflightWrite(api: GitHubApi, plan: BackfillPlan) {
   }
 
   if (plan.targets.length === 0) {
-    throw new Error("No missing stable 2.x releases to create.");
+    throw new Error("No missing stable releases to create.");
   }
 
   const [user, repository] = await Promise.all([
@@ -531,10 +531,10 @@ export function formatPlan(plan: BackfillPlan) {
   const lines = [
     `# ${plan.repository}`,
     "",
-    `Stable 2.x version changes since ${plan.cutoffDate}: ${plan.stableChanges.length}`,
-    `Existing stable 2.x releases since ${plan.cutoffDate}: ${plan.existing.length}`,
-    `Conflicting stable 2.x releases since ${plan.cutoffDate}: ${plan.conflicts.length}`,
-    `Missing stable 2.x releases to create: ${plan.targets.length}`,
+    `Stable version changes since ${plan.cutoffDate}: ${plan.stableChanges.length}`,
+    `Existing stable releases since ${plan.cutoffDate}: ${plan.existing.length}`,
+    `Conflicting stable releases since ${plan.cutoffDate}: ${plan.conflicts.length}`,
+    `Missing stable releases to create: ${plan.targets.length}`,
   ];
 
   if (plan.conflicts.length > 0) {

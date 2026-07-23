@@ -142,27 +142,33 @@ test("calculates inclusive calendar-month cutoffs", () => {
   assert.equal(getCutoffDate(1, new Date(2025, 2, 31)), "2025-02-28");
 });
 
-test("discovers stable 2.x backfill targets and skips prereleases/gaps", () => {
+test("discovers stable targets across major versions", () => {
   const changes = collectVersionChanges([
     snapshot("a", "0.1.0", "Initial commit"),
-    snapshot("b", "2.0.0-beta.1", "Release beta"),
-    snapshot("c", "2.0.0", "Release 2.0.0"),
-    snapshot("d", "2.0.1", "Fix one"),
-    snapshot("e", "2.1.0-beta.1", "Beta"),
-    snapshot("f", "2.1.0", "Release 2.1.0"),
-    snapshot("g", "2.1.3", "Skipped 2.1.2 on purpose"),
+    snapshot("b", "0.2.0", "Release 0.2.0"),
+    snapshot("c", "1.0.0-beta.1", "Release beta"),
+    snapshot("d", "1.0.0", "Release 1.0.0"),
+    snapshot("e", "spring", "Non-SemVer version"),
+    snapshot("f", "2.0.0-beta.1", "Release beta"),
+    snapshot("g", "2.0.0", "Release 2.0.0"),
+    snapshot("h", "10.0.0", "Release 10.0.0"),
   ]);
 
   const plan = buildBackfillPlan(
     GITHUB_REPOSITORY,
     changes,
-    existing(["2.0.0"], ["2.0.0"]),
+    existing(["0.1.0"], ["0.1.0"]),
     CUTOFF_DATE,
   );
 
   assert.deepEqual(
     plan.targets.map((target) => target.version),
-    ["2.0.1", "2.1.0", "2.1.3"],
+    ["0.2.0", "1.0.0", "2.0.0", "10.0.0"],
+  );
+  assert.equal(
+    plan.targets.find((target) => target.version === "2.0.0")
+      ?.previousStableVersion,
+    "1.0.0",
   );
   assert.match(formatPlan(plan), /^# example\/widgets/);
 });

@@ -1,10 +1,9 @@
 # Release Backfill
 
-Backfills missing GitHub releases for stable `2.x` package versions in the
-RingCentral Web Phone repository.
+Backfills missing GitHub releases for stable package versions.
 
-The tool scans the target repository's `package.json` history, finds stable
-`2.x` version bumps within a configured rolling window, skips prereleases,
+The tool scans each target repository's `package.json` history, finds numeric
+stable version bumps within a configured rolling window, skips prereleases,
 builds release notes from the commits between stable versions, and checks
 GitHub for existing tags and releases before writing anything.
 
