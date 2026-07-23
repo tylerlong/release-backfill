@@ -413,6 +413,10 @@ export async function applyBackfill(
   plan: BackfillPlan,
   options: PublishOptions = {},
 ) {
+  if (plan.targets.length === 0 && plan.conflicts.length === 0) {
+    return [];
+  }
+
   await preflightWrite(api, plan);
   return createPublishedReleases(api, plan.repository, plan.targets, options);
 }
@@ -525,6 +529,8 @@ export function formatGitHubApiError(
 
 export function formatPlan(plan: BackfillPlan) {
   const lines = [
+    `# ${plan.repository}`,
+    "",
     `Stable 2.x version changes since ${plan.cutoffDate}: ${plan.stableChanges.length}`,
     `Existing stable 2.x releases since ${plan.cutoffDate}: ${plan.existing.length}`,
     `Conflicting stable 2.x releases since ${plan.cutoffDate}: ${plan.conflicts.length}`,
@@ -568,12 +574,23 @@ export function readConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   const env = readEnv(envPath);
-  const repoPath = env.LOCAL_REPO_PATH ?? environment.LOCAL_REPO_PATH;
+  const repoPathsValue =
+    env.LOCAL_REPO_PATHS ?? environment.LOCAL_REPO_PATHS;
   const monthsValue = env.BACKFILL_MONTHS ?? environment.BACKFILL_MONTHS;
 
-  if (!repoPath) {
+  const repoRoots = [
+    ...new Set(
+      repoPathsValue
+        ?.split(",")
+        .map((repoPath) => repoPath.trim())
+        .filter(Boolean)
+        .map((repoPath) => resolve(repoPath)),
+    ),
+  ];
+
+  if (repoRoots.length === 0) {
     throw new Error(
-      "Missing LOCAL_REPO_PATH. Add LOCAL_REPO_PATH=../repository to .env.",
+      "Missing LOCAL_REPO_PATHS. Add LOCAL_REPO_PATHS=../repository to .env.",
     );
   }
 
@@ -590,9 +607,18 @@ export function readConfig(
 
   return {
     months,
-    repoRoot: resolve(repoPath),
+    repoRoots,
     token: env.GITHUB_TOKEN ?? environment.GITHUB_TOKEN,
   };
+}
+
+export async function processRepositories(
+  repoRoots: string[],
+  processRepository: (repoRoot: string) => Promise<void>,
+) {
+  for (const repoRoot of repoRoots) {
+    await processRepository(repoRoot);
+  }
 }
 
 export function getCutoffDate(months: number, now = new Date()) {

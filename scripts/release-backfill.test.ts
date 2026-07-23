@@ -10,11 +10,13 @@ import {
   buildBackfillPlan,
   buildReleaseNotes,
   collectVersionChanges,
+  formatPlan,
   type GitHubApi,
   GitHubApiError,
   type GitHubRepository,
   getCutoffDate,
   parseGitHubRepository,
+  processRepositories,
   readConfig,
 } from "./release-backfill-lib.js";
 
@@ -49,18 +51,18 @@ test("local .env config overrides globals and globals remain fallbacks", () => {
   try {
     writeFileSync(
       envPath,
-      "LOCAL_REPO_PATH=../local-repo\nBACKFILL_MONTHS=18\nGITHUB_TOKEN=local-token\n",
+      "LOCAL_REPO_PATHS=../local-repo, ../second-repo, ../local-repo\nBACKFILL_MONTHS=18\nGITHUB_TOKEN=local-token\n",
     );
 
     assert.deepEqual(
       readConfig(envPath, {
         BACKFILL_MONTHS: "24",
         GITHUB_TOKEN: "global-token",
-        LOCAL_REPO_PATH: "../global-repo",
+        LOCAL_REPO_PATHS: "../global-repo",
       }),
       {
         months: 18,
-        repoRoot: resolve("../local-repo"),
+        repoRoots: [resolve("../local-repo"), resolve("../second-repo")],
         token: "local-token",
       },
     );
@@ -68,11 +70,14 @@ test("local .env config overrides globals and globals remain fallbacks", () => {
       readConfig(join(directory, "missing.env"), {
         BACKFILL_MONTHS: "24",
         GITHUB_TOKEN: "global-token",
-        LOCAL_REPO_PATH: "../global-repo",
+        LOCAL_REPO_PATHS: "../global-repo, ../other-global-repo",
       }),
       {
         months: 24,
-        repoRoot: resolve("../global-repo"),
+        repoRoots: [
+          resolve("../global-repo"),
+          resolve("../other-global-repo"),
+        ],
         token: "global-token",
       },
     );
@@ -82,7 +87,7 @@ test("local .env config overrides globals and globals remain fallbacks", () => {
 });
 
 test("rejects missing and invalid backfill month values", () => {
-  const environment = { LOCAL_REPO_PATH: "../repo" };
+  const environment = { LOCAL_REPO_PATHS: "../repo" };
 
   assert.throws(() => readConfig("missing.env", environment), /Missing/);
   for (const value of ["0", "-1", "1.5", "months"]) {
@@ -95,6 +100,41 @@ test("rejects missing and invalid backfill month values", () => {
       /positive whole number/,
     );
   }
+});
+
+test("rejects an empty local repository list", () => {
+  assert.throws(
+    () =>
+      readConfig("missing.env", {
+        BACKFILL_MONTHS: "18",
+        LOCAL_REPO_PATHS: " , ",
+      }),
+    /Missing LOCAL_REPO_PATHS/,
+  );
+});
+
+test("processes repositories sequentially and stops on failure", async () => {
+  const events: string[] = [];
+
+  await processRepositories(["a", "b"], async (repoRoot) => {
+    events.push(`start ${repoRoot}`);
+    await Promise.resolve();
+    events.push(`end ${repoRoot}`);
+  });
+  assert.deepEqual(events, ["start a", "end a", "start b", "end b"]);
+
+  events.length = 0;
+  await assert.rejects(
+    () =>
+      processRepositories(["a", "b", "c"], async (repoRoot) => {
+        events.push(repoRoot);
+        if (repoRoot === "b") {
+          throw new Error("failed");
+        }
+      }),
+    /failed/,
+  );
+  assert.deepEqual(events, ["a", "b"]);
 });
 
 test("calculates inclusive calendar-month cutoffs", () => {
@@ -124,6 +164,7 @@ test("discovers stable 2.x backfill targets and skips prereleases/gaps", () => {
     plan.targets.map((target) => target.version),
     ["2.0.1", "2.1.0", "2.1.3"],
   );
+  assert.match(formatPlan(plan), /^# example\/widgets/);
 });
 
 test("limits backfill to the cutoff and keeps an older predecessor", () => {
@@ -228,6 +269,22 @@ test("apply preflights repository access and publishes releases", async () => {
       target_commitish: "b",
     },
   ]);
+});
+
+test("apply treats an up-to-date repository as a successful no-op", async () => {
+  const api = new FakeGitHubApi();
+  const plan = buildBackfillPlan(
+    GITHUB_REPOSITORY,
+    collectVersionChanges([
+      snapshot("a", "2.0.0", "Release 2.0.0"),
+      snapshot("b", "2.0.1", "Release 2.0.1"),
+    ]),
+    existing(["2.0.0", "2.0.1"], ["2.0.0", "2.0.1"]),
+    CUTOFF_DATE,
+  );
+
+  assert.deepEqual(await applyBackfill(api, plan), []);
+  assert.equal(api.preflighted, false);
 });
 
 test("apply reports progress after each published release", async () => {
