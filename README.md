@@ -26,7 +26,7 @@ Set the local checkout and token through the shell environment or this
 project's private `.env` file:
 
 ```dotenv
-LOCAL_REPO_PATHS=../ringcentral-web-phone,../another-repository
+LOCAL_REPO_PATHS=../ringcentral-web-phone,../ringcentral-softphone-ts
 BACKFILL_MONTHS=18
 GITHUB_TOKEN=github_pat_...
 ```
