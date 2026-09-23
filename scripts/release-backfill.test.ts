@@ -167,10 +167,65 @@ test("discovers stable targets across major versions", () => {
   );
   assert.equal(
     plan.targets.find((target) => target.version === "2.0.0")
-      ?.previousStableVersion,
+      ?.baselineVersion,
     "1.0.0",
   );
   assert.match(formatPlan(plan), /^# example\/widgets/);
+});
+
+test("includes supported prereleases with their correct baselines", async () => {
+  const api = new FakeGitHubApi();
+  const plan = buildBackfillPlan(
+    GITHUB_REPOSITORY,
+    collectVersionChanges([
+      snapshot("a", "1.0.0", "Release 1.0.0"),
+      snapshot("b", "2.0.0-alpha", "Release alpha"),
+      snapshot("c", "2.0.0-alpha.1", "Release alpha 1"),
+      snapshot("d", "2.0.0-preview.1", "Unsupported preview"),
+      snapshot("e", "2.0.0-beta", "Release beta"),
+      snapshot("f", "2.0.0-beta.2", "Release beta 2"),
+      snapshot("g", "2.0.0-beta.2.1", "Unsupported beta shape"),
+      snapshot("h", "2.0.0-rc", "Release candidate"),
+      snapshot("i", "2.0.0-rc.3", "Release candidate 3"),
+      snapshot("j", "2.0.0-rc.4+build", "Unsupported build metadata"),
+      snapshot("k", "2.0.0", "Release 2.0.0"),
+    ]),
+    existing(["1.0.0"], ["1.0.0"]),
+    CUTOFF_DATE,
+    () => [],
+    true,
+  );
+
+  assert.deepEqual(
+    plan.targets.map((target) => [
+      target.version,
+      target.baselineVersion,
+    ]),
+    [
+      ["2.0.0-alpha", "1.0.0"],
+      ["2.0.0-alpha.1", "2.0.0-alpha"],
+      ["2.0.0-beta", "2.0.0-alpha.1"],
+      ["2.0.0-beta.2", "2.0.0-beta"],
+      ["2.0.0-rc", "2.0.0-beta.2"],
+      ["2.0.0-rc.3", "2.0.0-rc"],
+      ["2.0.0", "1.0.0"],
+    ],
+  );
+
+  await applyBackfill(api, plan);
+  assert.deepEqual(
+    api.created.map(({ prerelease, tag_name }) => ({ prerelease, tag_name })),
+    [
+      { prerelease: true, tag_name: "2.0.0-alpha" },
+      { prerelease: true, tag_name: "2.0.0-alpha.1" },
+      { prerelease: true, tag_name: "2.0.0-beta" },
+      { prerelease: true, tag_name: "2.0.0-beta.2" },
+      { prerelease: true, tag_name: "2.0.0-rc" },
+      { prerelease: true, tag_name: "2.0.0-rc.3" },
+      { prerelease: false, tag_name: "2.0.0" },
+    ],
+  );
+  assert.doesNotMatch(formatPlan(plan), /stable/i);
 });
 
 test("limits backfill to the cutoff and keeps an older predecessor", () => {
@@ -187,7 +242,7 @@ test("limits backfill to the cutoff and keeps an older predecessor", () => {
   );
 
   assert.deepEqual(
-    plan.stableChanges.map((change) => change.version),
+    plan.eligibleChanges.map((change) => change.version),
     ["2.0.6", "2.0.7"],
   );
   assert.deepEqual(plan.conflicts, []);
@@ -196,7 +251,7 @@ test("limits backfill to the cutoff and keeps an older predecessor", () => {
     ["2.0.7"],
   );
   assert.equal(plan.targets[0].version, "2.0.6");
-  assert.equal(plan.targets[0].previousStableVersion, "2.0.5");
+  assert.equal(plan.targets[0].baselineVersion, "2.0.5");
 });
 
 test("skips existing releases and continues at the next missing version", () => {

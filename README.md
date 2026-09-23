@@ -1,26 +1,39 @@
 # Release Backfill
 
-Backfills missing GitHub releases for stable package versions.
+Backfills missing GitHub releases for package versions.
 
 The tool scans each target repository's `package.json` history, finds numeric
-stable version bumps within a configured rolling window, skips prereleases,
-builds release notes from the commits between stable versions, and checks
-GitHub for existing tags and releases before writing anything.
+version bumps within a configured rolling window, builds release notes, and
+checks GitHub for existing tags and releases before writing anything.
 
-Run a dry run:
+Run a stable-only dry run (the default):
 
 ```sh
 pnpm release:backfill
 ```
 
-Publish the missing releases:
+Add supported prereleases to the dry run:
+
+```sh
+pnpm release:backfill --include-pre
+```
+
+`--include-pre` accepts the `alpha`, `beta`, and `rc` channels, either bare or
+with one numeric sequence, such as `2.0.0-beta` or `2.0.0-beta.1`. Other
+prerelease shapes and build metadata are ignored. Prerelease notes compare with
+the preceding included version; stable release notes compare with the preceding
+stable version.
+
+Publish the selected missing releases:
 
 ```sh
 pnpm release:backfill --apply
+pnpm release:backfill --include-pre --apply
 ```
 
 `--apply` publishes real GitHub releases immediately. It does not create
-drafts. After each successful publish, the tool prints progress.
+drafts. Alpha, beta, and rc versions are marked as GitHub prereleases. After
+each successful publish, the tool prints progress.
 
 Set the local checkout and token through the shell environment or this
 project's private `.env` file:

@@ -26,6 +26,7 @@ main().catch((error) => {
 
 async function main() {
   const apply = process.argv.includes("--apply");
+  const includePrereleases = process.argv.includes("--include-pre");
   const { months, repoRoots, token } = readConfig();
 
   if (apply && !token) {
@@ -36,7 +37,7 @@ async function main() {
 
   const cutoffDate = getCutoffDate(months);
   await processRepositories(repoRoots, (repoRoot) =>
-    processRepository(repoRoot, cutoffDate, token, apply),
+    processRepository(repoRoot, cutoffDate, token, apply, includePrereleases),
   );
 
   if (!apply) {
@@ -49,6 +50,7 @@ async function processRepository(
   cutoffDate: string,
   token: string | undefined,
   apply: boolean,
+  includePrereleases: boolean,
 ) {
   if (!existsSync(resolve(repoRoot, "package.json"))) {
     throw new Error(`Missing package.json in ${repoRoot}.`);
@@ -72,8 +74,9 @@ async function processRepository(
     versionChanges,
     existingRemote,
     cutoffDate,
-    (previousStable, change) =>
-      getCommitsBetween(repoRoot, previousStable.sha, change.sha),
+    (baseline, change) =>
+      getCommitsBetween(repoRoot, baseline.sha, change.sha),
+    includePrereleases,
   );
 
   console.log(`\n${formatPlan(plan)}`);

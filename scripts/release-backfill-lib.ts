@@ -28,10 +28,10 @@ export type ExistingRemote = {
 };
 
 export type ReleaseTarget = VersionChange & {
+  baselineVersion: string;
+  baselineVersionSha: string;
   body: string;
   compareUrl: string;
-  previousStableSha: string;
-  previousStableVersion: string;
   relevantCommits: GitCommit[];
 };
 
@@ -44,9 +44,9 @@ export type ReleaseConflict = {
 export type BackfillPlan = {
   conflicts: ReleaseConflict[];
   cutoffDate: string;
+  eligibleChanges: VersionChange[];
   existing: VersionChange[];
   repository: string;
-  stableChanges: VersionChange[];
   targets: ReleaseTarget[];
 };
 
@@ -279,25 +279,37 @@ export function buildBackfillPlan(
   existingRemote: ExistingRemote,
   cutoffDate: string,
   getCommitsForTarget: (
-    previousStable: VersionChange,
+    baseline: VersionChange,
     change: VersionChange,
   ) => GitCommit[] = () => [],
+  includePrereleases = false,
 ): BackfillPlan {
-  const allStableChanges = versionChanges.filter((change) =>
-    isStableVersion(change.version),
+  const allEligibleChanges = versionChanges.filter(
+    (change) =>
+      isStableVersion(change.version) ||
+      (includePrereleases && isPrereleaseVersion(change.version)),
   );
   const conflicts: ReleaseConflict[] = [];
+  const eligibleChanges: VersionChange[] = [];
   const existing: VersionChange[] = [];
-  const stableChanges: VersionChange[] = [];
   const targets: ReleaseTarget[] = [];
+  let previousStable: VersionChange | undefined;
 
-  for (let index = 1; index < allStableChanges.length; index += 1) {
-    const change = allStableChanges[index];
-    if (change.date < cutoffDate) {
+  for (const [index, change] of allEligibleChanges.entries()) {
+    const stable = isStableVersion(change.version);
+    const baseline = stable
+      ? previousStable
+      : allEligibleChanges[index - 1];
+
+    if (stable) {
+      previousStable = change;
+    }
+
+    if (!baseline || change.date < cutoffDate) {
       continue;
     }
 
-    stableChanges.push(change);
+    eligibleChanges.push(change);
     const hasTag = existingRemote.tags.has(change.version);
     const hasRelease = existingRemote.releases.has(change.version);
 
@@ -311,13 +323,12 @@ export function buildBackfillPlan(
       continue;
     }
 
-    const previousStable = allStableChanges[index - 1];
     targets.push(
       buildReleaseTarget(
         repository,
         change,
-        previousStable,
-        getCommitsForTarget(previousStable, change),
+        baseline,
+        getCommitsForTarget(baseline, change),
       ),
     );
   }
@@ -325,9 +336,9 @@ export function buildBackfillPlan(
   return {
     conflicts,
     cutoffDate,
+    eligibleChanges,
     existing,
     repository,
-    stableChanges,
     targets,
   };
 }
@@ -335,22 +346,22 @@ export function buildBackfillPlan(
 export function buildReleaseTarget(
   repository: string,
   change: VersionChange,
-  previousStable: VersionChange,
+  baseline: VersionChange,
   commits: GitCommit[],
 ): ReleaseTarget {
   const notes = buildReleaseNotes(
     repository,
     change.version,
-    previousStable.version,
+    baseline.version,
     commits,
   );
 
   return {
     ...change,
+    baselineVersion: baseline.version,
+    baselineVersionSha: baseline.sha,
     body: notes.body,
     compareUrl: notes.compareUrl,
-    previousStableSha: previousStable.sha,
-    previousStableVersion: previousStable.version,
     relevantCommits: notes.relevantCommits,
   };
 }
@@ -377,6 +388,10 @@ export function buildReleaseNotes(
 
 export function isStableVersion(version: string) {
   return /^\d+\.\d+\.\d+$/.test(version);
+}
+
+function isPrereleaseVersion(version: string) {
+  return /^\d+\.\d+\.\d+-(?:alpha|beta|rc)(?:\.\d+)?$/.test(version);
 }
 
 export function isChoreCommit(message: string) {
@@ -427,7 +442,7 @@ export async function preflightWrite(api: GitHubApi, plan: BackfillPlan) {
   }
 
   if (plan.targets.length === 0) {
-    throw new Error("No missing stable releases to create.");
+    throw new Error("No missing releases to create.");
   }
 
   const [user, repository] = await Promise.all([
@@ -465,7 +480,7 @@ export async function createPublishedReleases(
         body: target.body,
         draft: false,
         name: target.version,
-        prerelease: false,
+        prerelease: isPrereleaseVersion(target.version),
         tag_name: target.version,
         target_commitish: target.sha,
       });
@@ -531,10 +546,10 @@ export function formatPlan(plan: BackfillPlan) {
   const lines = [
     `# ${plan.repository}`,
     "",
-    `Stable version changes since ${plan.cutoffDate}: ${plan.stableChanges.length}`,
-    `Existing stable releases since ${plan.cutoffDate}: ${plan.existing.length}`,
-    `Conflicting stable releases since ${plan.cutoffDate}: ${plan.conflicts.length}`,
-    `Missing stable releases to create: ${plan.targets.length}`,
+    `Eligible version changes since ${plan.cutoffDate}: ${plan.eligibleChanges.length}`,
+    `Existing releases since ${plan.cutoffDate}: ${plan.existing.length}`,
+    `Conflicting releases since ${plan.cutoffDate}: ${plan.conflicts.length}`,
+    `Missing releases to create: ${plan.targets.length}`,
   ];
 
   if (plan.conflicts.length > 0) {
