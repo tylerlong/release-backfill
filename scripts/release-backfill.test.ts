@@ -192,7 +192,12 @@ test("includes supported prereleases with their correct baselines", async () => 
     ]),
     existing(["1.0.0"], ["1.0.0"]),
     CUTOFF_DATE,
-    () => [],
+    (baseline, change) => [
+      commit(
+        `${baseline.sha}-${change.sha}`,
+        `Changes from ${baseline.version} to ${change.version}`,
+      ),
+    ],
     true,
   );
 
@@ -225,6 +230,23 @@ test("includes supported prereleases with their correct baselines", async () => 
       { prerelease: false, tag_name: "2.0.0" },
     ],
   );
+  const beta = api.created.find(
+    (release) => release.tag_name === "2.0.0-beta",
+  );
+  assert.match(
+    beta?.body ?? "",
+    /Changes from 2\.0\.0-alpha\.1 to 2\.0\.0-beta/,
+  );
+  assert.match(
+    beta?.body ?? "",
+    /compare\/2\.0\.0-alpha\.1\.\.\.2\.0\.0-beta/,
+  );
+
+  const stable = api.created.find(
+    (release) => release.tag_name === "2.0.0",
+  );
+  assert.match(stable?.body ?? "", /Changes from 1\.0\.0 to 2\.0\.0/);
+  assert.match(stable?.body ?? "", /compare\/1\.0\.0\.\.\.2\.0\.0/);
   assert.doesNotMatch(formatPlan(plan), /stable/i);
 });
 
@@ -323,6 +345,9 @@ test("apply preflights repository access and publishes releases", async () => {
   assert.equal(api.preflighted, true);
   assert.deepEqual(api.created, [
     {
+      body:
+        "Maintenance release.\n\n**Full Changelog**: " +
+        "https://github.com/example/widgets/compare/2.0.0...2.0.1",
       draft: false,
       name: "2.0.1",
       prerelease: false,
@@ -455,6 +480,7 @@ test("publish failure includes GitHub 429 body and retry headers", async () => {
 
 class FakeGitHubApi implements GitHubApi {
   created: Array<{
+    body: string;
     draft: boolean;
     name: string;
     prerelease: boolean;
@@ -491,6 +517,7 @@ class FakeGitHubApi implements GitHubApi {
     }
 
     this.created.push({
+      body: input.body,
       draft: input.draft,
       name: input.name,
       prerelease: input.prerelease,
